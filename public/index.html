@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cassiope · Getting started</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --muted:#667085; --line:#e4e7ec; --ok:#12805c; --ko:#c0341d; --warn:#a15c00; --accent:#4a5df0; --chip:#eef0f4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1216; --card:#181c22; --fg:#e8eaee; --muted:#98a2b3; --line:#2a3039; --ok:#3ecf9a; --ko:#ff7a66; --warn:#f5b04a; --accent:#8b99ff; --chip:#242a33; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:0 0 4px; }
+  h3 { font-size:14px; margin:16px 0 6px; }
+  .sub { color:var(--muted); margin:0 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-top:16px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; min-width:0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; word-break:break-all; }
+  th { color:var(--muted); font-weight:500; }
+  code, .mono { font-family:ui-monospace,monospace; font-size:12.5px; }
+  button { font:inherit; padding:5px 12px; border-radius:6px; border:1px solid var(--line); background:var(--chip); color:var(--fg); cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button:disabled { opacity:.5; cursor:wait; }
+  input { font:inherit; padding:5px 8px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  .chip { display:inline-block; padding:1px 8px; border-radius:99px; background:var(--chip); font-size:12px; }
+  .ok { color:var(--ok); } .ko { color:var(--ko); } .warn { color:var(--warn); }
+  .hint { color:var(--muted); font-size:13px; }
+  .result { margin-top:6px; padding:8px 10px; border-radius:6px; background:var(--bg); border:1px solid var(--line); font-size:13px; }
+  .result pre { margin:4px 0 0; white-space:pre-wrap; word-break:break-all; font-size:12px; }
+  .bar { height:8px; background:var(--chip); border-radius:99px; overflow:hidden; margin:6px 0; }
+  .bar > div { height:100%; background:var(--accent); }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+  .panel { border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .item { padding:8px 0; border-top:1px solid var(--line); }
+  .item:first-of-type { border-top:0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cassiope · Getting started</h1>
+  <p class="sub" id="whoami">Chargement…</p>
+
+  <section class="card" id="env">
+    <h2>1 · Variables d'environnement</h2>
+    <p class="sub">Ajoutez des variables au service dans Cassiope, redéployez, puis vérifiez ici qu'elles sont bien injectées. Les secrets sont masqués.</p>
+    <div class="row">
+      <input id="expected" class="grow" placeholder="Variables attendues, séparées par des virgules (ex. HELLO, API_KEY)">
+      <button id="expected-check">Vérifier</button>
+    </div>
+    <div id="expected-result" class="row" style="margin-top:8px"></div>
+    <h3>Variables du service</h3>
+    <div id="env-list"></div>
+    <p class="hint"><a href="#" id="toggle-system">Afficher les variables système</a></p>
+    <div id="env-system" hidden></div>
+  </section>
+
+  <section class="card" id="addons">
+    <h2>2 · Add-ons PostgreSQL et Redis</h2>
+    <p class="sub">Attachez un add-on au service (binding) : la variable injectée contenant une URL <code>postgres://</code> ou <code>redis://</code> est détectée automatiquement. Le test se connecte, écrit et relit une donnée.</p>
+    <div id="addons-list"></div>
+  </section>
+
+  <section class="card" id="peers">
+    <h2>3 · Connexion interne entre applications</h2>
+    <p class="sub">Déployez une seconde copie de ce service, exposez-la à une adresse interne, puis connectez celle-ci à la première : les variables <code>{PRÉFIXE}_URL</code>, <code>_HOST</code> et <code>_PORT</code> sont détectées ici.</p>
+    <div id="peers-list"></div>
+  </section>
+
+  <section class="card" id="storage">
+    <h2>4 · Stockage</h2>
+    <p class="sub">Comparez le disque applicatif (éphémère) et un volume persistant monté sur <code id="data-path">/data</code>. Le compteur de démarrages de chaque dossier ne survit à un redéploiement que s'il est sur un volume.</p>
+    <div class="cols" id="storage-dirs"></div>
+    <h3>Tous les montages</h3>
+    <div id="storage-mounts"></div>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const c of children.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return el;
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? undefined : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+const fmtBytes = (n) => (n >= 1024 ** 3 ? (n / 1024 ** 3).toFixed(1) + ' Go' : (n / 1024 ** 2).toFixed(n < 1024 ** 2 * 10 ? 1 : 0) + ' Mo');
+const fmtDate = (s) => new Date(s).toLocaleString('fr-FR');
+const hint = (text) => h('p', { class: 'hint' }, text);
+
+function varTable(vars) {
+  if (!vars.length) return hint('Aucune variable.');
+  return h('table', {}, ...vars.map((v) => h('tr', {}, h('td', { class: 'mono' }, v.key), h('td', { class: 'mono' }, v.value, v.masked ? h('span', { class: 'chip', style: 'margin-left:6px' }, `masquée · ${v.length} car.`) : ''))));
+}
+
+let envState = null;
+
+function renderExpected() {
+  const box = document.getElementById('expected-result');
+  box.replaceChildren();
+  if (!envState) return;
+  const names = document.getElementById('expected').value.split(',').map((s) => s.trim()).filter(Boolean);
+  const present = new Set([...envState.vars, ...envState.system].map((v) => v.key));
+  for (const n of names) box.append(h('span', { class: 'chip ' + (present.has(n) ? 'ok' : 'ko') }, (present.has(n) ? '✓ ' : '✗ ') + n));
+  try { localStorage.setItem('expected', document.getElementById('expected').value); } catch {}
+}
+
+function testResult(box, r) {
+  box.replaceChildren();
+  const lines = [h('div', { class: r.ok ? 'ok' : 'ko' }, r.ok ? `OK · ${r.ms} ms` : `Échec · ${r.ms} ms`)];
+  if (r.status) lines.push(h('div', {}, `HTTP ${r.status} · ${r.url}`));
+  if (r.error) lines.push(h('div', { class: 'ko' }, r.error));
+  if (r.version) lines.push(h('div', {}, r.version));
+  if (r.ok && r.writable === true) lines.push(h('div', { class: 'ok' }, 'Écriture puis relecture réussies'));
+  if (r.writable === false) lines.push(h('div', { class: 'warn' }, `Lecture seule ou écriture refusée : ${r.writeError}`));
+  if (r.hits != null) lines.push(h('div', {}, `Compteur cassiope-probe:hits = ${r.hits}`));
+  if (r.rows?.length) lines.push(h('pre', {}, r.rows.map((x) => `#${x.id}  ${x.at}  ${x.instance}`).join('\n')));
+  if (r.body !== undefined) lines.push(h('pre', {}, typeof r.body === 'string' ? r.body : JSON.stringify(r.body, null, 2)));
+  box.append(...lines);
+}
+
+function testItem(entry, label, run, extra) {
+  const out = h('div', { class: 'result', hidden: '' });
+  const btn = h('button', { onclick: async () => {
+    btn.disabled = true;
+    try { testResult(out, await run()); } catch (e) { testResult(out, { ok: false, ms: 0, error: e.message }); }
+    out.hidden = false;
+    btn.disabled = false;
+  } }, 'Tester');
+  return h('div', { class: 'item' }, h('div', { class: 'row' }, h('span', { class: 'mono grow' }, entry.name, ' → ', entry.target), extra, btn), out);
+}
+
+async function loadEnv() {
+  envState = await api('/api/env');
+  document.getElementById('env-list').replaceChildren(varTable(envState.vars));
+  document.getElementById('env-system').replaceChildren(varTable(envState.system));
+  renderExpected();
+
+  const addons = document.getElementById('addons-list');
+  addons.replaceChildren();
+  const { postgres, redis, peers } = envState.discovered;
+  for (const [title, list, kind] of [['PostgreSQL', postgres, 'postgres'], ['Redis', redis, 'redis']]) {
+    addons.append(h('h3', {}, title));
+    if (!list.length) addons.append(hint(`Aucun add-on ${title} détecté dans l'environnement.`));
+    for (const e of list) addons.append(testItem(e, title, () => api(`/api/test/${kind}`, { name: e.name })));
+  }
+
+  const box = document.getElementById('peers-list');
+  box.replaceChildren();
+  if (!peers.length) box.append(hint('Aucun lien interne détecté. Connectez ce service à un autre service exposé depuis l\'onglet Connexions.'));
+  for (const e of peers) {
+    const p = h('input', { value: '/api/whoami', size: '14', 'aria-label': 'Chemin' });
+    box.append(testItem(e, 'Lien', () => api('/api/test/peer', { name: e.name, path: p.value }), p));
+  }
+}
+
+function usageBar(u) {
+  if (!u) return hint('Usage indisponible.');
+  return h('div', {}, h('div', { class: 'bar' }, h('div', { style: `width:${Math.min(100, (u.used / u.total) * 100).toFixed(1)}%` })),
+    h('span', { class: 'hint' }, `${fmtBytes(u.used)} utilisés sur ${fmtBytes(u.total)} · ${fmtBytes(u.free)} libres`));
+}
+
+function dirPanel(id, title, d, reload) {
+  const dedicated = d.mount?.dedicated;
+  const status = h('span', { class: 'chip ' + (dedicated ? 'ok' : 'warn') }, dedicated ? 'Volume monté' : 'Disque applicatif éphémère');
+  const boot = d.boot?.error
+    ? h('p', { class: 'ko' }, `Écriture impossible : ${d.boot.error}`)
+    : h('p', { class: 'hint' }, `Démarrages : ${d.boot.bootCount} · premier ${fmtDate(d.boot.firstBootAt)}`, h('br'), `Conteneurs successifs : ${d.boot.hosts.join(' → ')}`);
+  const act = (label, fn) => { const b = h('button', { onclick: async () => { b.disabled = true; try { await fn(); } catch (e) { alert(e.message); } await reload(); } }, label); return b; };
+  return h('div', { class: 'panel' },
+    h('div', { class: 'row' }, h('strong', { class: 'grow' }, title), status),
+    h('div', { class: 'mono hint' }, d.path),
+    d.mount ? h('div', { class: 'mono hint' }, `${d.mount.fstype} · ${d.mount.source} · monté sur ${d.mount.mountPoint}`) : null,
+    dedicated ? null : hint('Aucun volume sur ce chemin : ces données disparaîtront au prochain déploiement.'),
+    usageBar(d.usage), boot,
+    h('div', { class: 'row' }, act('Écrire 10 Mo', () => api('/api/storage/write', { dir: id, mb: 10 })), act('Supprimer les fichiers de test', () => api('/api/storage/clear', { dir: id }))),
+    d.files.length ? h('table', { style: 'margin-top:8px' }, ...d.files.map((f) => h('tr', {}, h('td', { class: 'mono' }, f.name), h('td', {}, fmtBytes(f.size))))) : hint('Aucun fichier.'),
+    d.listError ? h('p', { class: 'ko' }, d.listError) : null);
+}
+
+async function loadStorage() {
+  const s = await api('/api/storage');
+  document.getElementById('data-path').textContent = s.dirs.data.path;
+  document.getElementById('storage-dirs').replaceChildren(
+    dirPanel('data', 'Volume persistant', s.dirs.data, loadStorage),
+    dirPanel('scratch', 'Disque applicatif', s.dirs.scratch, loadStorage));
+  document.getElementById('storage-mounts').replaceChildren(h('table', {}, h('tr', {}, h('th', {}, 'Point de montage'), h('th', {}, 'Type'), h('th', {}, 'Source'), h('th', {}, 'Usage')),
+    ...s.mounts.map((m) => h('tr', {}, h('td', { class: 'mono' }, m.mountPoint), h('td', {}, m.fstype), h('td', { class: 'mono' }, m.source), h('td', {}, m.usage ? `${fmtBytes(m.usage.used)} / ${fmtBytes(m.usage.total)}` : '–')))));
+}
+
+async function loadWho() {
+  const w = await api('/api/whoami');
+  document.getElementById('whoami').textContent = `${w.app} · v${w.version} · Node ${w.node} · démarré ${fmtDate(w.startedAt)} · conteneur ${w.hostname}`;
+}
+
+document.getElementById('toggle-system').addEventListener('click', (e) => {
+  e.preventDefault();
+  const el = document.getElementById('env-system');
+  el.hidden = !el.hidden;
+});
+document.getElementById('expected-check').addEventListener('click', loadEnv);
+try { document.getElementById('expected').value = localStorage.getItem('expected') || ''; } catch {}
+
+Promise.all([loadWho(), loadEnv(), loadStorage()]).catch((e) => { document.getElementById('whoami').textContent = 'Erreur : ' + e.message; });
+</script>
+</body>
+</html>
