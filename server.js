@@ -313,6 +313,191 @@ async function clearFillers(id) {
   return names.length;
 }
 
+// ------------------------------------------------- explorateurs (lecture seule)
+
+const CELL_MAX = 200;
+const PAGE_SIZE = 25;
+
+function cell(v) {
+  if (v == null) return null;
+  const s = v instanceof Date ? v.toISOString() : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return s.length > CELL_MAX ? s.slice(0, CELL_MAX) + '…' : s;
+}
+
+const quoteIdent = (s) => '"' + String(s).replace(/"/g, '""') + '"';
+
+async function withPg(entry, database, fn) {
+  const url = new URL(entry.url);
+  if (database) url.pathname = '/' + encodeURIComponent(database);
+  const client = new PgClient({ connectionString: url.toString(), connectionTimeoutMillis: 5000, statement_timeout: 5000 });
+  client.on('error', () => {});
+  try {
+    await withTimeout(client.connect(), 7000, 'connexion');
+    await client.query('begin read only');
+    return await fn(client);
+  } catch (err) {
+    throw new Error(scrub(err.message, entry));
+  } finally {
+    client.end().catch(() => {});
+  }
+}
+
+const LIST_DATABASES =
+  'select datname as name, pg_database_size(datname)::bigint as size from pg_database where not datistemplate and datallowconn order by 1';
+const LIST_TABLES = `select n.nspname as schema, c.relname as name, c.relkind as kind, greatest(c.reltuples, 0)::bigint as estimate
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+  where c.relkind in ('r', 'p', 'v', 'm') and n.nspname <> 'information_schema' and n.nspname not like 'pg\\_%'
+  order by 1, 2 limit 300`;
+
+async function pgExplore(entry, { database, schema, table, offset }) {
+  const databases = await withPg(entry, null, async (c) => ({
+    current: (await c.query('select current_database() as db')).rows[0].db,
+    list: (await c.query(LIST_DATABASES)).rows,
+  }));
+  const target = database || databases.current;
+  if (!databases.list.some((d) => d.name === target)) throw new Error('base inconnue');
+  return withPg(entry, target, async (c) => {
+    const tables = (await c.query(LIST_TABLES)).rows;
+    const out = { database: target, current: databases.current, databases: databases.list, tables };
+    if (table) {
+      if (!tables.some((t) => t.schema === schema && t.name === table)) throw new Error('table inconnue');
+      const qualified = `${quoteIdent(schema)}.${quoteIdent(table)}`;
+      const start = Math.max(0, Math.trunc(Number(offset)) || 0);
+      const res = await c.query(`select * from ${qualified} limit ${PAGE_SIZE} offset ${start}`);
+      const count = (await c.query(`select count(*)::bigint as n from ${qualified}`)).rows[0].n;
+      out.data = {
+        schema,
+        table,
+        offset: start,
+        pageSize: PAGE_SIZE,
+        total: Number(count),
+        columns: res.fields.map((f) => f.name),
+        rows: res.rows.map((r) => res.fields.map((f) => cell(r[f.name]))),
+      };
+    }
+    return out;
+  });
+}
+
+const QUEUE_KEY = 'cassiope-probe:queue';
+
+async function withRedis(entry, fn) {
+  const client = createClient({ url: entry.url, socket: { connectTimeout: 5000, reconnectStrategy: false } });
+  client.on('error', () => {});
+  try {
+    await withTimeout(client.connect(), 7000, 'connexion');
+    return await fn(client);
+  } catch (err) {
+    throw new Error(scrub(err.message, entry));
+  } finally {
+    client.disconnect().catch(() => {});
+  }
+}
+
+async function redisKeyContent(c, key, type) {
+  const max = PAGE_SIZE * 2 - 1;
+  switch (type) {
+    case 'string': return [String(await c.get(key))].map(cell);
+    case 'list': return (await c.lRange(key, 0, max)).map(cell);
+    case 'set': return (await c.sScan(key, 0, { COUNT: 50 })).members.slice(0, PAGE_SIZE * 2).map(cell);
+    case 'zset': return (await c.zRangeWithScores(key, 0, max)).map((m) => `${cell(m.value)} (score ${m.score})`);
+    case 'hash': return Object.entries(await c.hGetAll(key)).slice(0, PAGE_SIZE * 2).map(([f, v]) => `${f} = ${cell(v)}`);
+    case 'stream': return (await c.xRange(key, '-', '+', { COUNT: PAGE_SIZE * 2 })).map((m) => `${m.id} ${cell(m.message)}`);
+    default: return [];
+  }
+}
+
+async function redisExplore(entry, { key }) {
+  return withRedis(entry, async (c) => {
+    const out = { dbsize: await c.dbSize() };
+    let cursor = 0;
+    const names = [];
+    for (let i = 0; i < 20 && names.length < 100; i++) {
+      const res = await c.scan(cursor, { COUNT: 100 });
+      cursor = res.cursor;
+      names.push(...res.keys);
+      if (cursor === 0) break;
+    }
+    out.truncated = cursor !== 0 || names.length > 100;
+    out.keys = await Promise.all(
+      names.slice(0, 100).sort().map(async (name) => ({ name, type: await c.type(name), ttl: await c.ttl(name) })),
+    );
+    out.queue = { key: QUEUE_KEY, items: (await c.lRange(QUEUE_KEY, 0, PAGE_SIZE * 2 - 1)).map(cell), length: await c.lLen(QUEUE_KEY) };
+    if (key) {
+      const type = await c.type(key);
+      if (type === 'none') throw new Error('clé introuvable');
+      out.content = { key, type, ttl: await c.ttl(key), values: await redisKeyContent(c, key, type) };
+    }
+    return out;
+  });
+}
+
+// File de démonstration : seule zone en écriture des explorateurs, limitée à une clé `cassiope-probe:*`.
+async function redisQueue(entry, action) {
+  return withRedis(entry, async (c) => {
+    if (action === 'push') {
+      await c.rPush(QUEUE_KEY, JSON.stringify({ id: Date.now(), from: APP_NAME, at: new Date().toISOString() }));
+      await c.lTrim(QUEUE_KEY, -100, -1);
+    } else if (action === 'pop') await c.lPop(QUEUE_KEY);
+    else if (action === 'clear') await c.del(QUEUE_KEY);
+    else throw new Error('action inconnue');
+    return { length: await c.lLen(QUEUE_KEY) };
+  });
+}
+
+// -------------------------------------------------- config avancée et logs
+
+const HEALTH = { mode: 'ok', until: 0, delayMs: 0 };
+
+function healthState() {
+  if (HEALTH.mode !== 'ok' && Date.now() >= HEALTH.until) Object.assign(HEALTH, { mode: 'ok', until: 0, delayMs: 0 });
+  return { mode: HEALTH.mode, delayMs: HEALTH.delayMs, remainingSeconds: HEALTH.mode === 'ok' ? 0 : Math.ceil((HEALTH.until - Date.now()) / 1000) };
+}
+
+const EXTRA_PORTS = (process.env.EXTRA_PORTS || '')
+  .split(',')
+  .map((s) => Number(s.trim()))
+  .filter((p) => Number.isInteger(p) && p >= 1024 && p <= 65535 && p !== PORT);
+const LISTENING = [];
+
+function configReport(req) {
+  const h = req.headers;
+  return {
+    port: PORT,
+    listening: LISTENING,
+    extraPortsEnv: process.env.EXTRA_PORTS || null,
+    health: healthState(),
+    seenAs: { host: h.host, forwardedHost: h['x-forwarded-host'] || null, forwardedProto: h['x-forwarded-proto'] || null, forwardedFor: h['x-forwarded-for'] || null },
+  };
+}
+
+let logJob = null;
+
+function generateLogs({ count, level, intervalMs }) {
+  if (logJob) throw new Error('une génération est déjà en cours');
+  const levels = level === 'mixed' ? ['info', 'warn', 'error'] : [level];
+  const emit = (i) => {
+    const lv = levels[i % levels.length];
+    const line = JSON.stringify({ level: lv, app: APP_NAME, n: i + 1, of: count, msg: `Ligne de test ${i + 1}/${count}`, at: new Date().toISOString() });
+    (lv === 'info' ? console.log : lv === 'warn' ? console.warn : console.error)(line);
+  };
+  if (!intervalMs) {
+    for (let i = 0; i < count; i++) emit(i);
+    return { emitted: count, done: true };
+  }
+  let i = 0;
+  logJob = setInterval(() => {
+    emit(i++);
+    if (i >= count) {
+      clearInterval(logJob);
+      logJob = null;
+    }
+  }, intervalMs);
+  return { emitted: 0, done: false, seconds: Math.ceil((count * intervalMs) / 1000) };
+}
+
+const clampInt = (v, min, max, fallback) => Math.min(Math.max(Math.trunc(Number(v)) || fallback, min), max);
+
 // ----------------------------------------------------------------- serveur
 
 const INDEX_HTML = path.join(__dirname, 'public', 'index.html');
@@ -358,9 +543,42 @@ function whoami(req) {
 }
 
 const routes = {
-  'GET /healthz': (req, res) => {
-    res.writeHead(200, { 'content-type': 'text/plain' });
-    res.end('ok');
+  'GET /healthz': async (req, res) => {
+    const { mode, delayMs } = healthState();
+    if (mode === 'slow') await new Promise((r) => setTimeout(r, delayMs));
+    res.writeHead(mode === 'fail' ? 503 : 200, { 'content-type': 'text/plain' });
+    res.end(mode === 'fail' ? 'unhealthy (simulé)' : 'ok');
+  },
+  'GET /api/config': (req, res) => sendJson(res, 200, configReport(req)),
+  'POST /api/health': async (req, res) => {
+    const body = await readJson(req);
+    if (!['ok', 'fail', 'slow'].includes(body.mode)) return sendJson(res, 400, { error: 'mode inconnu' });
+    if (body.mode === 'ok') Object.assign(HEALTH, { mode: 'ok', until: 0, delayMs: 0 });
+    else Object.assign(HEALTH, { mode: body.mode, until: Date.now() + clampInt(body.seconds, 5, 600, 60) * 1000, delayMs: clampInt(body.delayMs, 100, 30000, 10000) });
+    sendJson(res, 200, healthState());
+  },
+  'POST /api/logs/generate': async (req, res) => {
+    const body = await readJson(req);
+    const level = ['info', 'warn', 'error', 'mixed'].includes(body.level) ? body.level : 'info';
+    sendJson(res, 200, generateLogs({ count: clampInt(body.count, 1, 500, 20), level, intervalMs: clampInt(body.intervalMs, 0, 2000, 0) }));
+  },
+  'POST /api/pg/explore': async (req, res) => {
+    const { name, database, schema, table, offset } = await readJson(req);
+    const entry = DISCOVERED.postgres.find((e) => e.name === name);
+    if (!entry) return sendJson(res, 404, { error: 'add-on PostgreSQL inconnu' });
+    sendJson(res, 200, await pgExplore(entry, { database, schema, table, offset }));
+  },
+  'POST /api/redis/explore': async (req, res) => {
+    const { name, key } = await readJson(req);
+    const entry = DISCOVERED.redis.find((e) => e.name === name);
+    if (!entry) return sendJson(res, 404, { error: 'add-on Redis inconnu' });
+    sendJson(res, 200, await redisExplore(entry, { key }));
+  },
+  'POST /api/redis/queue': async (req, res) => {
+    const { name, action } = await readJson(req);
+    const entry = DISCOVERED.redis.find((e) => e.name === name);
+    if (!entry) return sendJson(res, 404, { error: 'add-on Redis inconnu' });
+    sendJson(res, 200, await redisQueue(entry, action));
   },
   'GET /api/whoami': (req, res) => sendJson(res, 200, whoami(req)),
   'GET /api/env': (req, res) =>
@@ -423,7 +641,11 @@ const server = http.createServer(async (req, res) => {
 
 async function main() {
   for (const id of Object.keys(DIRS)) bootRecords[id] = await recordBoot(DIRS[id]);
+  for (const port of EXTRA_PORTS) {
+    http.createServer(server.listeners('request')[0]).listen(port, '0.0.0.0', () => LISTENING.push(port));
+  }
   server.listen(PORT, '0.0.0.0', () => {
+    LISTENING.unshift(PORT);
     console.log(`cassiope-getting-started ${pkg.version} (${APP_NAME}) : http://0.0.0.0:${PORT}`);
     console.log(
       `add-ons détectés : postgres=${DISCOVERED.postgres.length} redis=${DISCOVERED.redis.length} · liens internes=${DISCOVERED.peers.length}`,

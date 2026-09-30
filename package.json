@@ -1,6 +1,6 @@
 {
   "name": "cassiope-getting-started",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Petit service de test pour Cassiope : add-ons, variables, connexions internes, stockage.",
   "license": "MIT",
   "private": true,

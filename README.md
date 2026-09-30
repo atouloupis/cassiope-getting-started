@@ -10,6 +10,10 @@ add-ons, connexions internes et stockage. Une page web unique, en français.
 | **Add-ons** | Toute variable contenant une URL `postgres://` ou `redis://` est détectée (ou un groupe `X_HOST`/`X_PORT`/`X_USER`/`X_PASSWORD`/`X_DATABASE`). Le test se connecte, écrit et relit une donnée ; un binding en lecture seule est signalé. |
 | **Connexion interne** | Les variables `{PRÉFIXE}_URL` / `_HOST` / `_PORT` d'un lien interne sont détectées ; le test appelle `/api/whoami` (ou le chemin de votre choix) sur l'autre service. |
 | **Stockage** | Compare le disque applicatif (`/app/scratch`, éphémère) et `/data`. Indique si un volume est réellement monté, l'usage disque, et un compteur de démarrages qui ne survit à un redéploiement que sur un volume. |
+| **Explorateur PostgreSQL** | Liste les bases, les tables (avec estimation du nombre de lignes) et affiche les données d'une table, 25 lignes par page. Lecture seule (transaction `READ ONLY`), cellules tronquées à 200 caractères. |
+| **Explorateur Redis** | Liste les clés (100 max) avec type et TTL, affiche le contenu d'une clé (chaîne, liste, set, zset, hash, stream) et une file de démonstration `cassiope-probe:queue` que l'on peut empiler, dépiler et vider. |
+| **Configuration avancée** | Affiche les ports en écoute et l'hôte vu par l'application. Boutons pour simuler un healthcheck `/healthz` en 503 ou lent (10 s) pendant 60 s, puis retour automatique à l'état sain. |
+| **Génération de logs** | Écrit N lignes JSON (info sur stdout, warn/error sur stderr), avec un intervalle optionnel, à consulter dans l'onglet Logs. |
 
 ## Parcours de test dans Cassiope
 
@@ -27,6 +31,7 @@ add-ons, connexions internes et stockage. Une page web unique, en français.
 | `APP_NAME` | nom d'hôte | Nom affiché, utile pour distinguer deux copies |
 | `DATA_DIR` | `/data` | Dossier où monter le volume persistant |
 | `SCRATCH_DIR` | `/app/scratch` | Dossier sur le disque applicatif |
+| `EXTRA_PORTS` | – | Ports supplémentaires (1024–65535, séparés par des virgules) où écouter, pour tester le port exposé |
 
 Sonde de santé : `GET /healthz` (`wget -q -O /dev/null http://127.0.0.1:3000/healthz`).
 
@@ -42,7 +47,7 @@ docker build -t cassiope-getting-started . && docker run --rm -p 3000:3000 cassi
 Outil de démonstration : à ne pas laisser exposé publiquement avec de vrais secrets. Les valeurs
 sensibles sont masquées, les tests réseau ne ciblent que des adresses issues de l'environnement (jamais
 saisies par le visiteur), et les écritures se limitent à la table `cassiope_probe` (20 lignes max), aux
-clés Redis `cassiope-probe:*` et à des fichiers `probe-*.bin` de 100 Mo max. Le conteneur tourne en root
+clés Redis `cassiope-probe:*` (les explorateurs eux-mêmes sont en lecture seule, hors file de démonstration) et à des fichiers `probe-*.bin` de 100 Mo max. Le conteneur tourne en root
 pour pouvoir écrire dans un volume fraîchement monté.
 
 ## Licence
