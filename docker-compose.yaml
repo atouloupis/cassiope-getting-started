@@ -17,6 +17,8 @@ services:
     image: nginx:alpine
     ports:
       - "8081:80"
+    volumes:
+      - ./volumes/web/index.html:/usr/share/nginx/html/index.html:ro
     depends_on:
       init:
         condition: service_completed_successfully
