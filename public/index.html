@@ -26,6 +26,9 @@
   button { font:inherit; padding:5px 12px; border-radius:6px; border:1px solid var(--line); background:var(--chip); color:var(--fg); cursor:pointer; }
   button:hover { border-color:var(--accent); }
   button:disabled { opacity:.5; cursor:wait; }
+  select { font:inherit; padding:5px 8px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+  details { margin:8px 0; } summary { cursor:pointer; color:var(--accent); } ol { padding-left:20px; }
+  .scroll { overflow-x:auto; }
   input { font:inherit; padding:5px 8px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
   .chip { display:inline-block; padding:1px 8px; border-radius:99px; background:var(--chip); font-size:12px; }
   .ok { color:var(--ok); } .ko { color:var(--ko); } .warn { color:var(--warn); }
@@ -65,18 +68,68 @@
     <div id="addons-list"></div>
   </section>
 
+  <section class="card" id="pg-explorer">
+    <h2>3 · Explorateur PostgreSQL</h2>
+    <p class="sub">Bases, tables puis données de l'add-on connecté (lecture seule, 25 lignes par page, cellules tronquées).</p>
+    <div id="pg-list"></div>
+  </section>
+
+  <section class="card" id="redis-explorer">
+    <h2>4 · Explorateur Redis</h2>
+    <p class="sub">Clés, contenu d'une clé et file de démonstration <code>cassiope-probe:queue</code> (seule clé que cette page écrit).</p>
+    <div id="redis-list"></div>
+  </section>
+
   <section class="card" id="peers">
-    <h2>3 · Connexion interne entre applications</h2>
-    <p class="sub">Déployez une seconde copie de ce service, exposez-la à une adresse interne, puis connectez celle-ci à la première : les variables <code>{PRÉFIXE}_URL</code>, <code>_HOST</code> et <code>_PORT</code> sont détectées ici.</p>
+    <h2>5 · Connexion interne entre applications</h2>
+    <p class="sub">Les variables <code>{PRÉFIXE}_URL</code>, <code>_HOST</code> et <code>_PORT</code> injectées par un lien interne sont détectées ici.</p>
+    <details>
+      <summary>Comment tester une adresse interne, et prérequis</summary>
+      <ol>
+        <li>Déployez une <strong>seconde copie</strong> de ce service (le <em>producteur</em>) dans la même machine que celle-ci : deux ressources ne se connectent que si elles tournent sur le même nœud.</li>
+        <li>Dans le producteur, onglet <strong>Connexions</strong> : <em>Exposer</em> avec le port <code>3000</code> (ou celui de <code>PORT</code>), portée <code>internal</code> (même projet) ou <code>tenant</code>. Le service est redéployé.</li>
+        <li>Dans ce service (le <em>consommateur</em>), onglet <strong>Connexions</strong> : <em>Connecter</em> le producteur avec un préfixe, par exemple <code>API</code>. Trois variables sont injectées au prochain déploiement : <code>API_URL</code>, <code>API_HOST</code>, <code>API_PORT</code>.</li>
+        <li><strong>Redéployez le consommateur</strong> : les variables ne sont lues qu'au démarrage. Le lien apparaît alors ci-dessous : cliquez sur <em>Tester</em>.</li>
+      </ol>
+      <p class="hint">Un test réussi affiche la réponse du producteur, dont <code>calledBy</code> = le nom de ce service. Un délai dépassé signale le plus souvent deux services sur des nœuds différents ou un producteur non redéployé après l'exposition ; un refus de connexion, un mauvais port exposé.</p>
+    </details>
     <div id="peers-list"></div>
   </section>
 
   <section class="card" id="storage">
-    <h2>4 · Stockage</h2>
+    <h2>6 · Stockage</h2>
     <p class="sub">Comparez le disque applicatif (éphémère) et un volume persistant monté sur <code id="data-path">/data</code>. Le compteur de démarrages de chaque dossier ne survit à un redéploiement que s'il est sur un volume.</p>
     <div class="cols" id="storage-dirs"></div>
     <h3>Tous les montages</h3>
     <div id="storage-mounts"></div>
+  </section>
+
+  <section class="card" id="advanced">
+    <h2>7 · Configuration avancée : ports et healthcheck</h2>
+    <p class="sub">Testez le comportement de Cassiope face à un service qui change de port ou devient malsain. Les pannes simulées se désarment seules.</p>
+    <div id="config-info"></div>
+    <h3>Healthcheck <code>/healthz</code></h3>
+    <div class="row">
+      <button data-mode="fail">Renvoyer 503 (60 s)</button>
+      <button data-mode="slow">Répondre en 10 s (60 s)</button>
+      <button data-mode="ok">Rétablir</button>
+    </div>
+    <div id="health-state" class="hint" style="margin-top:6px"></div>
+    <p class="hint">Attendu : un service configuré avec un healthcheck est marqué malsain après quelques échecs ; sans healthcheck, rien ne change. Voir la page du service pour l'état affiché.</p>
+    <h3>Ports</h3>
+    <p class="hint">Le service écoute sur <code>PORT</code> (3000 par défaut). Pour tester un autre port : changez <code>PORT</code> puis le port exposé dans Cassiope, ou ajoutez <code>EXTRA_PORTS=8081,8082</code> pour écouter sur plusieurs ports, puis exposez l'un d'eux. Le bloc ci-dessus indique le port et l'hôte vus par l'application.</p>
+  </section>
+
+  <section class="card" id="logs">
+    <h2>8 · Génération de logs</h2>
+    <p class="sub">Écrit des lignes JSON sur la sortie standard (info) ou d'erreur (warn, error), à consulter dans l'onglet Logs du service.</p>
+    <div class="row">
+      <label>Nombre <input id="log-count" type="number" value="20" min="1" max="500" style="width:80px"></label>
+      <label>Niveau <select id="log-level"><option value="info">info</option><option value="warn">warn</option><option value="error">error</option><option value="mixed" selected>mixte</option></select></label>
+      <label>Intervalle (ms) <input id="log-interval" type="number" value="0" min="0" max="2000" style="width:80px"></label>
+      <button id="log-go">Générer</button>
+    </div>
+    <div id="log-result" class="hint" style="margin-top:6px"></div>
   </section>
 </main>
 
@@ -162,6 +215,11 @@ async function loadEnv() {
     for (const e of list) addons.append(testItem(e, title, () => api(`/api/test/${kind}`, { name: e.name })));
   }
 
+  for (const [id, list, kind, title] of [['pg-list', postgres, 'pg', 'PostgreSQL'], ['redis-list', redis, 'redis', 'Redis']]) {
+    const el = document.getElementById(id);
+    el.replaceChildren(...(list.length ? list.map((e) => explorer(e, kind, kind === 'pg' ? renderPg : renderRedis(e))) : [hint(`Aucun add-on ${title} détecté : attachez-en un au service puis redéployez.`)]));
+  }
+
   const box = document.getElementById('peers-list');
   box.replaceChildren();
   if (!peers.length) box.append(hint('Aucun lien interne détecté. Connectez ce service à un autre service exposé depuis l\'onglet Connexions.'));
@@ -170,6 +228,72 @@ async function loadEnv() {
     box.append(testItem(e, 'Lien', () => api('/api/test/peer', { name: e.name, path: p.value }), p));
   }
 }
+
+
+function dataTable(columns, rows) {
+  if (!rows.length) return hint('Aucune ligne.');
+  return h('div', { class: 'scroll' }, h('table', {}, h('tr', {}, ...columns.map((c) => h('th', {}, c))),
+    ...rows.map((r) => h('tr', {}, ...r.map((v) => h('td', { class: 'mono' }, v === null ? h('span', { class: 'hint' }, 'NULL') : v))))));
+}
+
+function explorer(entry, kind, render) {
+  const out = h('div', { class: 'result' }, 'Chargement…');
+  const load = async (params) => {
+    try { render(out, await api(`/api/${kind}/explore`, { name: entry.name, ...params }), load); }
+    catch (e) { out.replaceChildren(h('div', { class: 'ko' }, e.message)); }
+  };
+  load({});
+  return h('div', { class: 'item' }, h('div', { class: 'row' }, h('span', { class: 'mono grow' }, entry.name, ' → ', entry.target), h('button', { onclick: () => load({}) }, 'Actualiser')), out);
+}
+
+function renderPg(out, d, load) {
+  const parts = [h('div', {}, 'Bases : ', ...d.databases.map((x) => h('button', { style: 'margin:0 4px 4px 0', class: x.name === d.database ? 'chip ok' : '', onclick: () => load({ database: x.name }) }, `${x.name} · ${fmtBytes(Number(x.size))}`)))];
+  parts.push(h('h3', {}, `Tables de ${d.database}`));
+  parts.push(d.tables.length ? dataTable(['Schéma', 'Nom', 'Type', 'Lignes (estim.)', ''], d.tables.map((t) => [t.schema, t.name, { r: 'table', p: 'partitionnée', v: 'vue', m: 'vue matérialisée' }[t.kind], String(t.estimate), h('button', { onclick: () => load({ database: d.database, schema: t.schema, table: t.name }) }, 'Voir')])) : hint('Aucune table.'));
+  if (d.data) {
+    const x = d.data;
+    parts.push(h('h3', {}, `${x.schema}.${x.table} · ${x.total} ligne(s)`), dataTable(x.columns, x.rows));
+    parts.push(h('div', { class: 'row' },
+      h('button', Object.assign({ onclick: () => load({ database: d.database, schema: x.schema, table: x.table, offset: Math.max(0, x.offset - x.pageSize) }) }, x.offset ? {} : { disabled: '' }), '← Précédent'),
+      h('span', { class: 'hint' }, `${Math.min(x.offset + 1, x.total)}–${Math.min(x.offset + x.pageSize, x.total)} sur ${x.total}`),
+      h('button', Object.assign({ onclick: () => load({ database: d.database, schema: x.schema, table: x.table, offset: x.offset + x.pageSize }) }, x.offset + x.pageSize < x.total ? {} : { disabled: '' }), 'Suivant →')));
+  }
+  out.replaceChildren(...parts);
+}
+
+function renderRedis(entry) {
+  return (out, d, load) => {
+    const q = async (action) => { try { await api('/api/redis/queue', { name: entry.name, action }); } catch (e) { alert(e.message); } load({}); };
+    const parts = [h('div', { class: 'hint' }, `${d.dbsize} clé(s) dans la base${d.truncated ? ' · liste limitée aux 100 premières' : ''}`)];
+    parts.push(h('h3', {}, `File de démonstration · ${d.queue.length} élément(s)`),
+      h('div', { class: 'row' }, h('button', { onclick: () => q('push') }, 'Empiler un message'), h('button', { onclick: () => q('pop') }, 'Dépiler'), h('button', { onclick: () => q('clear') }, 'Vider')),
+      d.queue.items.length ? h('pre', {}, d.queue.items.join('\n')) : hint('File vide.'));
+    parts.push(h('h3', {}, 'Clés'), d.keys.length ? dataTable(['Clé', 'Type', 'TTL', ''], d.keys.map((k) => [k.name, k.type, k.ttl < 0 ? '–' : `${k.ttl} s`, h('button', { onclick: () => load({ key: k.name }) }, 'Voir')])) : hint('Base vide.'));
+    if (d.content) parts.push(h('h3', {}, `${d.content.key} (${d.content.type})`), d.content.values.length ? h('pre', {}, d.content.values.join('\n')) : hint('Contenu vide ou type non affichable.'));
+    out.replaceChildren(...parts);
+  };
+}
+
+async function loadConfig() {
+  const c = await api('/api/config');
+  document.getElementById('config-info').replaceChildren(h('p', { class: 'hint' },
+    `Ports en écoute : ${c.listening.join(', ') || '–'} · vu comme : ${c.seenAs.host}` +
+    (c.seenAs.forwardedHost ? ` · x-forwarded-host ${c.seenAs.forwardedHost}` : '') + (c.seenAs.forwardedProto ? ` · ${c.seenAs.forwardedProto}` : '')));
+  const hs = c.health;
+  document.getElementById('health-state').textContent = hs.mode === 'ok' ? 'État simulé : sain.' : `État simulé : ${hs.mode === 'fail' ? '503' : `lent (${hs.delayMs / 1000} s)`} · encore ${hs.remainingSeconds} s.`;
+}
+
+for (const b of document.querySelectorAll('#advanced button[data-mode]')) {
+  b.addEventListener('click', async () => { try { await api('/api/health', { mode: b.dataset.mode }); } catch (e) { alert(e.message); } loadConfig(); });
+}
+
+document.getElementById('log-go').addEventListener('click', async () => {
+  const box = document.getElementById('log-result');
+  try {
+    const r = await api('/api/logs/generate', { count: Number(document.getElementById('log-count').value), level: document.getElementById('log-level').value, intervalMs: Number(document.getElementById('log-interval').value) });
+    box.textContent = r.done ? `${r.emitted} ligne(s) écrite(s).` : `Génération en cours (environ ${r.seconds} s).`;
+  } catch (e) { box.textContent = e.message; }
+});
 
 function usageBar(u) {
   if (!u) return hint('Usage indisponible.');
@@ -218,7 +342,7 @@ document.getElementById('toggle-system').addEventListener('click', (e) => {
 document.getElementById('expected-check').addEventListener('click', loadEnv);
 try { document.getElementById('expected').value = localStorage.getItem('expected') || ''; } catch {}
 
-Promise.all([loadWho(), loadEnv(), loadStorage()]).catch((e) => { document.getElementById('whoami').textContent = 'Erreur : ' + e.message; });
+Promise.all([loadWho(), loadEnv(), loadStorage(), loadConfig()]).catch((e) => { document.getElementById('whoami').textContent = 'Erreur : ' + e.message; });
 </script>
 </body>
 </html>

@@ -1,0 +1,26 @@
+services:
+  init:
+    image: alpine:3.20
+    command: ["sh", "-c", "echo init-done && sleep 2"]
+    restart: "no"
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: spike-pass
+    volumes:
+      - ./volumes/db/data:/var/lib/postgresql/data:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+  web:
+    image: nginx:alpine
+    ports:
+      - "8081:80"
+    volumes:
+      - ./volumes/web/index.html:/usr/share/nginx/html/index.html:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
