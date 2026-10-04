@@ -226,6 +226,25 @@ async function usage(dir) {
   }
 }
 
+// Taille du CONTENU d'un dossier : la seule mesure honnête sur le disque applicatif, dont `statfs`
+// décrirait le disque de la machine hôte (partagée avec d'autres conteneurs) et non ce conteneur.
+async function dirSize(dir, depth = 0) {
+  if (depth > 8) return 0;
+  let total = 0;
+  let entries = [];
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) total += await dirSize(p, depth + 1);
+    else if (e.isFile()) total += (await fsp.stat(p).catch(() => ({ size: 0 }))).size;
+  }
+  return total;
+}
+
 const PROBE_FILE = '.cassiope-probe.json';
 
 // Chaque démarrage incrémente un compteur posé dans le dossier : il survit à un redéploiement
@@ -271,10 +290,14 @@ async function storageReport() {
     } catch (err) {
       listError = err.message;
     }
+    const dedicated = Boolean(mount) && mount.mountPoint !== '/';
     dirs[id] = {
       path: dir,
-      mount: mount ? { ...mount, dedicated: mount.mountPoint !== '/' } : null,
-      usage: await usage(dir),
+      mount: mount ? { ...mount, dedicated } : null,
+      // total/libre : uniquement pour un volume dédié (c'est alors SON système de fichiers).
+      // Sur le disque applicatif, `statfs` renverrait celui de la machine hôte : on ne l'expose pas.
+      usage: dedicated ? await usage(dir) : null,
+      contentBytes: await dirSize(dir),
       boot: bootRecords[id],
       files,
       listError,
@@ -283,7 +306,7 @@ async function storageReport() {
   const all = await Promise.all(
     mounts
       .filter((m) => !PSEUDO_FS.test(m.fstype) && !m.mountPoint.startsWith('/etc/') && !m.mountPoint.startsWith('/proc'))
-      .map(async (m) => ({ ...m, usage: await usage(m.mountPoint) })),
+      .map(async (m) => ({ ...m, usage: m.mountPoint === '/' ? null : await usage(m.mountPoint) })),
   );
   return { dirs, mounts: all };
 }

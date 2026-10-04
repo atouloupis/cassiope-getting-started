@@ -295,8 +295,8 @@ document.getElementById('log-go').addEventListener('click', async () => {
   } catch (e) { box.textContent = e.message; }
 });
 
-function usageBar(u) {
-  if (!u) return hint('Usage indisponible.');
+function usageBar(u, contentBytes) {
+  if (!u) return hint(`Contenu du dossier : ${fmtBytes(contentBytes || 0)}`);
   return h('div', {}, h('div', { class: 'bar' }, h('div', { style: `width:${Math.min(100, (u.used / u.total) * 100).toFixed(1)}%` })),
     h('span', { class: 'hint' }, `${fmtBytes(u.used)} utilisés sur ${fmtBytes(u.total)} · ${fmtBytes(u.free)} libres`));
 }
@@ -313,7 +313,7 @@ function dirPanel(id, title, d, reload) {
     h('div', { class: 'mono hint' }, d.path),
     d.mount ? h('div', { class: 'mono hint' }, `${d.mount.fstype} · ${d.mount.source} · monté sur ${d.mount.mountPoint}`) : null,
     dedicated ? null : hint('Aucun volume sur ce chemin : ces données disparaîtront au prochain déploiement.'),
-    usageBar(d.usage), boot,
+    usageBar(d.usage, d.contentBytes), boot,
     h('div', { class: 'row' }, act('Écrire 10 Mo', () => api('/api/storage/write', { dir: id, mb: 10 })), act('Supprimer les fichiers de test', () => api('/api/storage/clear', { dir: id }))),
     d.files.length ? h('table', { style: 'margin-top:8px' }, ...d.files.map((f) => h('tr', {}, h('td', { class: 'mono' }, f.name), h('td', {}, fmtBytes(f.size))))) : hint('Aucun fichier.'),
     d.listError ? h('p', { class: 'ko' }, d.listError) : null);
