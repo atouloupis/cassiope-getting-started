@@ -7,6 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { Client: PgClient } = require('pg');
 const { createClient } = require('redis');
+const mysql = require('mysql2/promise');
 
 const pkg = require('./package.json');
 
@@ -46,12 +47,14 @@ function envReport() {
 
 // Détecte, dans l'environnement, ce que Cassiope injecte : URLs d'add-ons (bindings) et liens internes.
 function discover(env) {
-  const found = { postgres: [], redis: [], peers: [] };
+  const found = { postgres: [], mysql: [], redis: [], peers: [] };
   const seenUrlPrefixes = new Set();
 
   for (const [name, value] of Object.entries(env)) {
     if (/^postgres(ql)?:\/\//i.test(value)) {
       found.postgres.push({ name, url: value });
+    } else if (/^(mysql|mariadb):\/\//i.test(value)) {
+      found.mysql.push({ name, url: value.replace(/^mariadb:/i, 'mysql:') });
     } else if (/^rediss?:\/\//i.test(value)) {
       found.redis.push({ name, url: value });
     } else if (/_URL$/.test(name) && /^https?:\/\//i.test(value)) {
@@ -71,7 +74,9 @@ function discover(env) {
     const pass = env[`${prefix}_PASSWORD`];
     const db = env[`${prefix}_DATABASE`] || env[`${prefix}_DB`] || env[`${prefix}_NAME`];
     const auth = `${encodeURIComponent(user || '')}:${encodeURIComponent(pass || '')}`;
-    if (user && pass && db) {
+    if (user && pass && db && String(port) === '3306') {
+      found.mysql.push({ name: `${prefix}_*`, url: `mysql://${auth}@${host}:${port}/${encodeURIComponent(db)}` });
+    } else if (user && pass && db) {
       found.postgres.push({ name: `${prefix}_*`, url: `postgres://${auth}@${host}:${port}/${encodeURIComponent(db)}` });
     } else if (pass && !user && !db) {
       found.redis.push({ name: `${prefix}_*`, url: `redis://:${encodeURIComponent(pass)}@${host}:${port}` });
@@ -131,6 +136,35 @@ async function testPostgres(entry) {
     return { ok: false, ms: Date.now() - started, error: scrub(err.message, entry) };
   } finally {
     client.end().catch(() => {});
+  }
+}
+
+async function testMysql(entry) {
+  const started = Date.now();
+  let conn;
+  try {
+    conn = await withTimeout(mysql.createConnection({ uri: entry.url, connectTimeout: 5000 }), 7000, 'connexion');
+    const version = (await conn.query('select version() as v'))[0][0].v;
+    const result = { ok: true, ms: 0, version, writable: true, rows: [] };
+    try {
+      await conn.query(
+        'create table if not exists cassiope_probe (id int auto_increment primary key, at timestamp not null default current_timestamp, instance varchar(255))',
+      );
+      await conn.query('insert into cassiope_probe (instance) values (?)', [APP_NAME]);
+      await conn.query(
+        'delete from cassiope_probe where id <= (select id from (select id from cassiope_probe order by id desc limit 1 offset 20) t)',
+      );
+      result.rows = (await conn.query('select id, at, instance from cassiope_probe order by id desc limit 5'))[0];
+    } catch (err) {
+      result.writable = false;
+      result.writeError = scrub(err.message, entry);
+    }
+    result.ms = Date.now() - started;
+    return result;
+  } catch (err) {
+    return { ok: false, ms: Date.now() - started, error: scrub(err.message, entry) };
+  } finally {
+    if (conn) conn.end().catch(() => {});
   }
 }
 
@@ -609,6 +643,7 @@ const routes = {
       ...envReport(),
       discovered: {
         postgres: DISCOVERED.postgres.map(publicEntry),
+        mysql: DISCOVERED.mysql.map(publicEntry),
         redis: DISCOVERED.redis.map(publicEntry),
         peers: DISCOVERED.peers.map(publicEntry),
       },
@@ -630,6 +665,12 @@ const routes = {
     const entry = DISCOVERED.postgres.find((e) => e.name === name);
     if (!entry) return sendJson(res, 404, { error: 'add-on PostgreSQL inconnu' });
     sendJson(res, 200, await testPostgres(entry));
+  },
+  'POST /api/test/mysql': async (req, res) => {
+    const { name } = await readJson(req);
+    const entry = DISCOVERED.mysql.find((e) => e.name === name);
+    if (!entry) return sendJson(res, 404, { error: 'add-on MySQL inconnu' });
+    sendJson(res, 200, await testMysql(entry));
   },
   'POST /api/test/redis': async (req, res) => {
     const { name } = await readJson(req);
@@ -671,7 +712,7 @@ async function main() {
     LISTENING.unshift(PORT);
     console.log(`cassiope-getting-started ${pkg.version} (${APP_NAME}) : http://0.0.0.0:${PORT}`);
     console.log(
-      `add-ons détectés : postgres=${DISCOVERED.postgres.length} redis=${DISCOVERED.redis.length} · liens internes=${DISCOVERED.peers.length}`,
+      `add-ons détectés : postgres=${DISCOVERED.postgres.length} mysql=${DISCOVERED.mysql.length} redis=${DISCOVERED.redis.length} · liens internes=${DISCOVERED.peers.length}`,
     );
   });
 }

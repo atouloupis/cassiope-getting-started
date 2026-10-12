@@ -7,7 +7,7 @@ add-ons, connexions internes et stockage. Une page web unique, en français.
 | Section | Ce qu'elle teste |
 |---|---|
 | **Variables** | Les variables ajoutées au service sont-elles injectées ? Les secrets sont masqués (2 premiers caractères + longueur). |
-| **Add-ons** | Toute variable contenant une URL `postgres://` ou `redis://` est détectée (ou un groupe `X_HOST`/`X_PORT`/`X_USER`/`X_PASSWORD`/`X_DATABASE`). Le test se connecte, écrit et relit une donnée ; un binding en lecture seule est signalé. |
+| **Add-ons** | Toute variable contenant une URL `postgres://`, `mysql://` (ou `mariadb://`) ou `redis://` est détectée (ou un groupe `X_HOST`/`X_PORT`/`X_USER`/`X_PASSWORD`/`X_DATABASE`). Le test se connecte, écrit et relit une donnée ; un binding en lecture seule est signalé. |
 | **Connexion interne** | Les variables `{PRÉFIXE}_URL` / `_HOST` / `_PORT` d'un lien interne sont détectées ; le test appelle `/api/whoami` (ou le chemin de votre choix) sur l'autre service. |
 | **Stockage** | Compare le disque applicatif (`/app/scratch`, éphémère) et `/data`. Indique si un volume est réellement monté, l'usage disque, et un compteur de démarrages qui ne survit à un redéploiement que sur un volume. |
 | **Explorateur PostgreSQL** | Liste les bases, les tables (avec estimation du nombre de lignes) et affiche les données d'une table, 25 lignes par page. Lecture seule (transaction `READ ONLY`), cellules tronquées à 200 caractères. |
@@ -19,7 +19,7 @@ add-ons, connexions internes et stockage. Une page web unique, en français.
 
 1. Créez un service depuis l'image `ghcr.io/atouloupis/cassiope-getting-started:latest` (port `3000`) ou depuis ce dépôt Git (build Dockerfile).
 2. **Variables** : ajoutez `HELLO=world` et une variable secrète, redéployez, vérifiez-les dans la section 1.
-3. **Add-ons** : créez un add-on PostgreSQL et un Redis, attachez-les au service (bindings), redéployez, cliquez « Tester ».
+3. **Add-ons** : créez un add-on PostgreSQL, un MySQL et un Redis, attachez-les au service (bindings), redéployez, cliquez « Tester ».
 4. **Connexion interne** : déployez une seconde copie, exposez-la à une adresse interne, connectez la première à la seconde, redéployez, cliquez « Tester ».
 5. **Stockage** : notez le compteur de démarrages, redéployez (il retombe à 1 sans volume). Ajoutez un volume persistant monté sur `/data`, redéployez deux fois : le compteur de `/data` s'incrémente.
 

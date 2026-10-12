@@ -63,8 +63,8 @@
   </section>
 
   <section class="card" id="addons">
-    <h2>2 · Add-ons PostgreSQL et Redis</h2>
-    <p class="sub">Attachez un add-on au service (binding) : la variable injectée contenant une URL <code>postgres://</code> ou <code>redis://</code> est détectée automatiquement. Le test se connecte, écrit et relit une donnée.</p>
+    <h2>2 · Add-ons PostgreSQL, MySQL et Redis</h2>
+    <p class="sub">Attachez un add-on au service (binding) : la variable injectée contenant une URL <code>postgres://</code>, <code>mysql://</code> ou <code>redis://</code> est détectée automatiquement. Le test se connecte, écrit et relit une donnée.</p>
     <div id="addons-list"></div>
   </section>
 
@@ -208,8 +208,8 @@ async function loadEnv() {
 
   const addons = document.getElementById('addons-list');
   addons.replaceChildren();
-  const { postgres, redis, peers } = envState.discovered;
-  for (const [title, list, kind] of [['PostgreSQL', postgres, 'postgres'], ['Redis', redis, 'redis']]) {
+  const { postgres, mysql, redis, peers } = envState.discovered;
+  for (const [title, list, kind] of [['PostgreSQL', postgres, 'postgres'], ['MySQL', mysql, 'mysql'], ['Redis', redis, 'redis']]) {
     addons.append(h('h3', {}, title));
     if (!list.length) addons.append(hint(`Aucun add-on ${title} détecté dans l'environnement.`));
     for (const e of list) addons.append(testItem(e, title, () => api(`/api/test/${kind}`, { name: e.name })));
