@@ -253,7 +253,7 @@ async function usage(dir) {
   try {
     const s = await fsp.statfs(dir);
     const total = s.blocks * s.bsize;
-    const free = s.bavail * s.bsize;
+    const free = s.bfree * s.bsize;
     return { total, free, used: total - free };
   } catch {
     return null;
